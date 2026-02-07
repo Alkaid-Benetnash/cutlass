@@ -515,13 +515,14 @@ pdftotext -f 308 -l 340 manual/ptx_isa_9.1.pdf -    # TMA async copy
 
 ### Methodology: Using the Built-in Table of Contents
 
-Both PDFs have comprehensive built-in Tables of Contents at the beginning that map section names to page numbers. **However, the TOC page numbers have an offset from actual PDF page numbers.**
+All three PDFs have comprehensive built-in Tables of Contents at the beginning that map section names to page numbers. **However, the TOC page numbers have an offset from actual PDF page numbers.**
 
 **Page Number Offsets (IMPORTANT):**
 | Document | TOC Pages | Offset | Formula |
 |----------|-----------|--------|---------|
 | PTX ISA 9.1 | 1-20 | +12 | actual_page = toc_page + 12 |
 | CUDA Programming Guide | 3-16 | +16 | actual_page = toc_page + 16 |
+| CUDA Driver API | 1-25 | +38 | actual_page = toc_page + 38 |
 
 **Step 1: Extract and search the TOC to find the logical page number**
 ```bash
@@ -531,6 +532,9 @@ pdftotext -layout -f 1 -l 8 manual/ptx_isa_9.1.pdf - | grep -i "wgmma"
 
 # CUDA Programming Guide TOC
 pdftotext -layout -f 3 -l 10 manual/cuda-programming-guide.pdf - | grep -i "unified"
+
+# CUDA Driver API TOC
+pdftotext -layout -f 1 -l 25 manual/CUDA_Driver_API.pdf - | grep -i "memory management"
 ```
 
 **Step 2: Apply offset and extract the target pages**
@@ -540,6 +544,9 @@ pdftotext -f 581 -l 632 manual/ptx_isa_9.1.pdf -
 
 # CUDA: TOC says Ch2 at 17 → actual page = 17 + 16 = 33
 pdftotext -f 33 -l 100 manual/cuda-programming-guide.pdf -
+
+# Driver API: TOC says Memory Management at 175 → actual page = 175 + 38 = 213
+pdftotext -f 213 -l 308 manual/CUDA_Driver_API.pdf -
 ```
 
 **Why offsets exist:** The TOC uses "logical" page numbers starting from the first content page (Chapter 1 = page 1 or similar), but the actual PDF includes front matter (title page, TOC itself, lists of figures/tables) before the content begins.
@@ -553,6 +560,10 @@ pdftotext -f 33 -l 100 manual/cuda-programming-guide.pdf -
 | PTX mbarrier (9.7.13.15) | 403 | +12 | 415 |
 | CUDA Ch 1 Introduction | 3 | +16 | 19 |
 | CUDA Ch 2 Programming | 17 | +16 | 33 |
+| Driver API Ch 1 | 1 | +38 | 39 |
+| Driver API Ch 6 Modules | 9 | +38 | 47 |
+| Driver API 6.13 Memory Mgmt | 175 | +38 | 213 |
+| Driver API 6.30 Tensor Map | 535 | +38 | 573 |
 
 ### CUDA Programming Guide (Release 13.1)
 
@@ -698,6 +709,103 @@ pdftotext -f 33 -l 100 manual/cuda-programming-guide.pdf -
 | **TensorCore 5th Gen/tcgen05** (9.7.16) | 635-752 | `pdftotext -f 635 -l 752 manual/ptx_isa_9.1.pdf -` |
 | **Special Registers** (Ch 10) | 777-805 | `pdftotext -f 777 -l 805 manual/ptx_isa_9.1.pdf -` |
 
+### CUDA Driver API Reference
+
+**File:** `manual/CUDA_Driver_API.pdf` (803 pages)
+
+**Date caveat:** The title page says "January 2024", but this is a template error. The PDF metadata creation date is **January 8, 2026**, and the content includes compute capabilities up to `sm_121a` (via `CUjit_target` enum), confirming it covers hardware through Blackwell and beyond. This is a recent document despite the misleading title page date.
+
+*Note: Offset of +38 has been applied. These are actual `pdftotext -f/-l` page numbers.*
+
+This is the low-level CUDA Driver API reference. Unlike the Runtime API (`cuda_runtime.h`), the Driver API (`cuda.h`) provides explicit control over contexts, modules, and kernel loading. All functions use the `cu` prefix (e.g., `cuMemAlloc`, `cuLaunchKernel`).
+
+#### Chapter Index (with Actual PDF Page Numbers)
+
+| Chapter | Actual PDF Pages | Topics |
+|---------|------------------|--------|
+| **1. Driver vs Runtime APIs** | 39-40 | Complexity vs control, context management, interoperability |
+| **2. API Synchronization Behavior** | 41-42 | API call synchronization semantics |
+| **3. Stream Synchronization Behavior** | 43-44 | Legacy vs per-thread default stream |
+| **4. Graph Object Thread Safety** | 45 | Thread safety rules for graph objects |
+| **5. Rules for Version Mixing** | 46 | Driver/runtime version compatibility |
+| **6. Modules** | 47-707 | All API functions (see detailed index below) |
+| **7. Data Structures** | 708-803 | Struct/union definitions for API parameters |
+
+#### Section 6: API Modules (Detailed)
+
+| Section | Actual PDF Pages | Topics |
+|---------|------------------|--------|
+| 6.1 Data Types | 48-135 | Enums, typedefs, structs, constants (`CUdevice_attribute`, `CUresult`, `CUtensorMap`, etc.) |
+| 6.2 Error Handling | 136-137 | `cuGetErrorString`, `cuGetErrorName` |
+| 6.3 Initialization | 137-138 | `cuInit` |
+| 6.4 Version Management | 138-139 | `cuDriverGetVersion` |
+| 6.5 Device Management | 138-150 | `cuDeviceGet`, `cuDeviceGetAttribute`, `cuDeviceGetCount`, `cuDeviceGetName`, `cuDeviceGetUuid`, etc. |
+| 6.6 Device Management [DEPRECATED] | 150-152 | Legacy device property queries |
+| 6.7 Primary Context Management | 152-157 | `cuDevicePrimaryCtxGetState`, `cuDevicePrimaryCtxRelease`, `cuDevicePrimaryCtxRetain`, `cuDevicePrimaryCtxSetFlags` |
+| 6.8 Context Management | 157-178 | `cuCtxCreate`, `cuCtxDestroy`, `cuCtxGetCurrent`, `cuCtxSetCurrent`, `cuCtxSynchronize`, `cuCtxGetDevice`, etc. |
+| 6.9 Context Management [DEPRECATED] | 178-182 | Legacy context APIs |
+| 6.10 Module Management | 182-195 | `cuModuleLoad`, `cuModuleGetFunction`, `cuModuleGetGlobal`, `cuModuleLoadData`, etc. |
+| 6.11 Module Management [DEPRECATED] | 195-196 | Legacy module APIs |
+| 6.12 Library Management | 196-213 | `cuLibraryLoadFromFile`, `cuLibraryGetKernel`, `cuKernelGetFunction`, etc. |
+| **6.13 Memory Management** | 213-309 | `cuMemAlloc`, `cuMemFree`, `cuMemcpy`, `cuMemcpyHtoD`, `cuMemcpyDtoH`, `cuMemAllocHost`, `cuMemHostAlloc`, `cuMemGetInfo`, etc. |
+| **6.14 Virtual Memory Management** | 309-324 | `cuMemCreate`, `cuMemMap`, `cuMemSetAccess`, `cuMemAddressReserve`, `cuMemRelease`, `cuMemUnmap`, multicast |
+| 6.15 Stream Ordered Memory Allocator | 324-339 | `cuMemAllocAsync`, `cuMemFreeAsync`, `cuMemPoolCreate`, `cuMemPoolSetAccess` |
+| 6.16 Multicast Object Management | 339-349 | `cuMulticastCreate`, `cuMulticastAddDevice`, `cuMulticastBindAddr`, `cuMulticastBindMem` |
+| 6.17 Unified Addressing | 349-369 | `cuPointerGetAttribute`, `cuPointerSetAttribute`, `cuMemPrefetchAsync`, `cuMemAdvise`, `cuMemRangeGetAttribute` |
+| 6.18 Stream Management | 369-393 | `cuStreamCreate`, `cuStreamSynchronize`, `cuStreamWaitEvent`, `cuStreamQuery`, `cuStreamBeginCapture`, etc. |
+| 6.19 Event Management | 393-399 | `cuEventCreate`, `cuEventRecord`, `cuEventSynchronize`, `cuEventElapsedTime`, `cuEventQuery` |
+| 6.20 External Resource Interop | 399-414 | `cuImportExternalMemory`, `cuExternalMemoryGetMappedBuffer`, `cuImportExternalSemaphore`, `cuSignalExternalSemaphoresAsync` |
+| 6.21 Stream Memory Operations | 414-419 | `cuStreamBatchMemOp`, `cuStreamWriteValue32`, `cuStreamWaitValue32` |
+| **6.22 Execution Control** | 419-441 | `cuLaunchKernel`, `cuLaunchKernelEx`, `cuLaunchCooperativeKernel`, `cuFuncSetAttribute`, `cuFuncGetAttribute`, `cuFuncSetCacheConfig` |
+| 6.23 Execution Control [DEPRECATED] | 441-452 | Legacy kernel launch APIs (`cuLaunch`, `cuParamSet*`) |
+| **6.24 Graph Management** | 452-535 | `cuGraphCreate`, `cuGraphAddKernelNode`, `cuGraphInstantiate`, `cuGraphLaunch`, `cuGraphExecUpdate`, conditional nodes, memory nodes |
+| 6.25 Occupancy | 535-543 | `cuOccupancyMaxActiveBlocksPerMultiprocessor`, `cuOccupancyMaxPotentialBlockSize`, etc. |
+| 6.26 Texture Ref Management [DEPRECATED] | 543-563 | Legacy texture reference APIs |
+| 6.27 Surface Ref Management [DEPRECATED] | 563-564 | Legacy surface reference APIs |
+| 6.28 Texture Object Management | 564-571 | `cuTexObjectCreate`, `cuTexObjectDestroy`, `cuTexObjectGetTextureDesc` |
+| 6.29 Surface Object Management | 571-573 | `cuSurfObjectCreate`, `cuSurfObjectDestroy` |
+| **6.30 Tensor Map Object Management** | 573-589 | `cuTensorMapEncodeTiled`, `cuTensorMapEncodeIm2col`, `cuTensorMapReplaceAddress` |
+| 6.31 Peer Context Memory Access | 589-594 | `cuCtxEnablePeerAccess`, `cuCtxDisablePeerAccess`, `cuDeviceCanAccessPeer`, `cuDeviceGetP2PAttribute` |
+| 6.32 Graphics Interoperability | 594-600 | `cuGraphicsMapResources`, `cuGraphicsUnmapResources`, `cuGraphicsResourceGetMappedPointer` |
+| 6.33 Driver Entry Point Access | 600-602 | `cuGetProcAddress` |
+| 6.34 Coredump Attributes Control | 602-610 | `cuCoredumpGetAttribute`, `cuCoredumpSetAttribute` |
+| **6.35 Green Contexts** | 610-628 | `cuGreenCtxCreate`, `cuDeviceGetDevResource`, `cuCtxFromGreenCtx`, `cuSmResourceSplit` |
+| 6.36 Error Log Management | 628-631 | `cuGetErrorLog` |
+| 6.37 CUDA Checkpointing | 631-635 | `cuCheckpointLock`, `cuCheckpointUnlock`, `cuCheckpointRestore`, `cuCheckpointCheckpoint` |
+| 6.38 Profiler Control [DEPRECATED] | 635-636 | Legacy profiler APIs |
+| 6.39 Profiler Control | 636-637 | `cuProfilerStart`, `cuProfilerStop` |
+| 6.40-6.45 Graphics Interop | 637-707 | OpenGL, Direct3D 9/10/11, VDPAU, EGL interoperability |
+
+#### Key Sections Quick Reference (Actual PDF Page Numbers)
+
+| Topic | Actual PDF Pages | Command to Extract |
+|-------|------------------|-------------------|
+| **Driver vs Runtime APIs** (Ch 1) | 39-40 | `pdftotext -f 39 -l 40 manual/CUDA_Driver_API.pdf -` |
+| **Data Types & Enums** (6.1) | 48-135 | `pdftotext -f 48 -l 135 manual/CUDA_Driver_API.pdf -` |
+| **CUresult Error Codes** (6.1) | 110-118 | `pdftotext -f 110 -l 118 manual/CUDA_Driver_API.pdf -` |
+| **CUdevice_attribute** (6.1) | 61-69 | `pdftotext -f 61 -l 69 manual/CUDA_Driver_API.pdf -` |
+| **Initialization** (6.3) | 137-138 | `pdftotext -f 137 -l 138 manual/CUDA_Driver_API.pdf -` |
+| **Device Management** (6.5) | 138-150 | `pdftotext -f 138 -l 150 manual/CUDA_Driver_API.pdf -` |
+| **Context Management** (6.8) | 157-178 | `pdftotext -f 157 -l 178 manual/CUDA_Driver_API.pdf -` |
+| **Module Management** (6.10) | 182-195 | `pdftotext -f 182 -l 195 manual/CUDA_Driver_API.pdf -` |
+| **Library Management** (6.12) | 196-213 | `pdftotext -f 196 -l 213 manual/CUDA_Driver_API.pdf -` |
+| **Memory Management** (6.13) | 213-309 | `pdftotext -f 213 -l 309 manual/CUDA_Driver_API.pdf -` |
+| **Virtual Memory Management** (6.14) | 309-324 | `pdftotext -f 309 -l 324 manual/CUDA_Driver_API.pdf -` |
+| **Stream Ordered Memory** (6.15) | 324-339 | `pdftotext -f 324 -l 339 manual/CUDA_Driver_API.pdf -` |
+| **Multicast Objects** (6.16) | 339-349 | `pdftotext -f 339 -l 349 manual/CUDA_Driver_API.pdf -` |
+| **Unified Addressing** (6.17) | 349-369 | `pdftotext -f 349 -l 369 manual/CUDA_Driver_API.pdf -` |
+| **Stream Management** (6.18) | 369-393 | `pdftotext -f 369 -l 393 manual/CUDA_Driver_API.pdf -` |
+| **Event Management** (6.19) | 393-399 | `pdftotext -f 393 -l 399 manual/CUDA_Driver_API.pdf -` |
+| **Execution Control / Kernel Launch** (6.22) | 419-441 | `pdftotext -f 419 -l 441 manual/CUDA_Driver_API.pdf -` |
+| **Graph Management** (6.24) | 452-535 | `pdftotext -f 452 -l 535 manual/CUDA_Driver_API.pdf -` |
+| **Occupancy** (6.25) | 535-543 | `pdftotext -f 535 -l 543 manual/CUDA_Driver_API.pdf -` |
+| **Tensor Map Object Management** (6.30) | 573-589 | `pdftotext -f 573 -l 589 manual/CUDA_Driver_API.pdf -` |
+| **Green Contexts** (6.35) | 610-628 | `pdftotext -f 610 -l 628 manual/CUDA_Driver_API.pdf -` |
+| **CUDA Checkpointing** (6.37) | 631-635 | `pdftotext -f 631 -l 635 manual/CUDA_Driver_API.pdf -` |
+| **Data Structures** (Ch 7) | 708-803 | `pdftotext -f 708 -l 803 manual/CUDA_Driver_API.pdf -` |
+
+**Use this document for:** Driver API function signatures, parameter details, return codes, `cuMemAlloc`/`cuMemcpy` variants, `cuLaunchKernel`/`cuLaunchKernelEx`, `cuTensorMapEncodeTiled`, context/module/library management, virtual memory (`cuMemCreate`/`cuMemMap`), graph APIs, green contexts, occupancy queries, device attributes.
+
 ### Quick Reference: When to Consult Each Manual
 
 | Question Type | Primary Source |
@@ -712,3 +820,11 @@ pdftotext -f 33 -l 100 manual/cuda-programming-guide.pdf -
 | "How do I use TMA for tensor copies?" | PTX ISA 9.7.9.25 (cp.async.bulk.tensor) |
 | "What compute capability do I need for feature X?" | CUDA Programming Guide Ch. 5, PTX ISA release notes |
 | "What are tcgen05 instructions?" | PTX ISA 9.7.16 (Blackwell TensorCore) |
+| "What are the parameters for `cuLaunchKernel`?" | CUDA Driver API 6.22 (Execution Control) |
+| "How do I use `cuMemAlloc` / `cuMemcpy`?" | CUDA Driver API 6.13 (Memory Management) |
+| "What is `cuTensorMapEncodeTiled`?" | CUDA Driver API 6.30 (Tensor Map Object Management) |
+| "How do I create/manage CUDA contexts?" | CUDA Driver API 6.8 (Context Management) |
+| "What are green contexts / `cuGreenCtxCreate`?" | CUDA Driver API 6.35 (Green Contexts) |
+| "How do I use virtual memory (`cuMemCreate`)?" | CUDA Driver API 6.14 (Virtual Memory Management) |
+| "What device attributes can I query?" | CUDA Driver API 6.1 (`CUdevice_attribute`) |
+| "What are `CUresult` error codes?" | CUDA Driver API 6.1 (`CUresult` enum) |

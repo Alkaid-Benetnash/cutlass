@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(pdftotext:*)",
-      "Bash(pdfgrep:*)"
+      "Bash(pdfgrep:*)",
+      "Bash(pdfinfo:*)"
     ]
   }
 }
