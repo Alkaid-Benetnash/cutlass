@@ -315,12 +315,15 @@ from cutlass.cute.arch.mbar import (
 1. **Use `defer_sync=True`** and explicit `pipeline_init_arrive/wait` for cluster sync
 2. **Use `try_acquire()`/`try_wait()`** for non-blocking peeks to overlap computation
 3. **Always call `producer.tail()`** before exiting producer warps
-4. **Use `elect_one()`** context for single-thread barrier operations
+4. **Use `elect_one()`** context for single-thread barrier operations (but NOT for TMA copies - see below)
 5. **Allocate barrier storage** in shared memory with 8-byte alignment
+6. **Never wrap `cute.copy()` with TMA atoms in `elect_one()`** - the copy operation handles election internally
 
 ### Thread Election APIs
 
-CuTe DSL provides thread election for single-thread operations (TMA, barrier management).
+CuTe DSL provides thread election for single-thread operations (barrier management, certain synchronization primitives).
+
+**WARNING:** Do NOT use `elect_one()` around operations that handle election internally (like `cute.copy()` with TMA atoms). This causes nested `elect.sync` instructions that deadlock. See "TMA Usage in CuTe DSL" below.
 
 #### Warp-Level Election
 
@@ -334,35 +337,68 @@ with elect_one():
 
 #### Block-Level Election (Manual Pattern)
 
-No built-in API exists for block-level election. Combine warp index check with `elect_one()`:
+No built-in API exists for block-level election. Combine warp index check with `elect_one()` for barrier operations (NOT for TMA copies):
 
 ```python
 warp_idx = thread_idx // 32
 if warp_idx == 0:
     with elect_one():
         # Only one thread in entire thread block executes this
-        pass
+        # Use for barrier ops, NOT for cute.copy() with TMA
+        mbarrier_arrive(barrier_ptr)
 ```
 
 ### TMA Usage in CuTe DSL
 
-**TMA operations must be issued by a single elected thread**, not all threads.
+**IMPORTANT: `cute.copy()` handles thread election internally for TMA atoms.** Do NOT wrap TMA copies in `elect_one()` - this causes nested `elect.sync` instructions that deadlock.
 
-#### Correct Pattern:
-```python
-# Single thread issues TMA load
-warp_idx = thread_idx // 32
-if warp_idx == tma_warp_id:
-    with elect_one():
-        cute.copy(tma_atom, src, dst, tma_bar_ptr=barrier, mcast_mask=mask)
+#### Why This Matters
+
+The `elect.sync` PTX instruction requires ALL threads specified in its mask to participate. When you wrap `cute.copy()` in `elect_one()`:
+1. Outer `elect_one()` generates `elect.sync -1` → 31 threads branch away
+2. Inner election from `cute.copy()` generates another `elect.sync -1` → expects 32 threads, only 1 present
+3. **DEADLOCK**: The single thread waits forever for 31 threads that already diverged
+
+#### Evidence from Source Code
+
+From `python/CuTeDSL/cutlass/cute/algorithm.py:364-365`:
+```
+For Copy Atoms requiring single-threaded execution, thread election is managed automatically by the
+copy operation. External thread selection mechanisms are not necessary.
 ```
 
-#### cute.copy() with TMA - Called by SINGLE Thread:
+#### Correct Pattern (CuTe DSL):
 ```python
-# Only elected thread issues the actual TMA copy
+# Restrict to first warp, but do NOT use elect_one() around cute.copy()
+if warp_idx == 0:
+    tAsA, tAgA = cpasync.tma_partition(tma_atom, ...)
+    # cute.copy() handles election internally - just call it directly
+    cute.copy(tma_atom, tAgA, tAsA, tma_bar_ptr=barrier, mcast_mask=mask)
+```
+
+See `examples/python/CuTeDSL/hopper/dense_gemm_persistent.py:756-773` for reference usage.
+
+#### Incorrect Pattern (causes deadlock):
+```python
+# DO NOT DO THIS - nested elect.sync causes deadlock
+if warp_idx == 0:
+    with elect_one():  # ← WRONG: cute.copy() already handles election
+        cute.copy(tma_atom, tAgA, tAsA, tma_bar_ptr=barrier)
+```
+
+#### When to Use `elect_one()`
+
+Use `elect_one()` for operations that do NOT handle election internally:
+```python
+# Correct: mbarrier operations need explicit election
 with elect_one():
-    cute.copy(tma_atom, tiled_src, tiled_dst, tma_bar_ptr=barrier)
+    mbarrier_arrive(barrier_ptr)
+    mbarrier_arrive_and_expect_tx(barrier_ptr, tx_bytes)
 ```
+
+#### C++ vs CuTe DSL Difference
+
+Note that C++ CuTe requires explicit election for TMA (using `cute::elect_one_sync()`), but CuTe DSL's `cute.copy()` wraps this automatically. This is a key API difference between the two.
 
 ### Reference Examples
 
