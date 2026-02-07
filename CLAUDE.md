@@ -37,72 +37,26 @@ When updating CLAUDE.md:
 3. **If unsure whether upstream examples exist**, explicitly ask the user for judgment before adding generated code to CLAUDE.md.
 4. **Include source file references** (e.g., `include/cute/arch/cluster_sm90.hpp:180`) when citing evidence from the codebase.
 
+### Evidence-Based Claims (Critical)
+
+**NEVER make claims or assumptions about hardware behavior, synchronization requirements, or instruction semantics without explicit evidence from authoritative sources.** Common mistakes to avoid:
+
+1. **Unjustified extrapolation**: Do not assume how one component works based on how another component works. For example, do not assume the TMA's mbarrier access uses the async proxy just because the TMA's data copy uses the async proxy.
+
+2. **Plausible-sounding speculation**: Statements like "this might internally use X" or "this probably works by Y" without evidence are harmful. Either find evidence or explicitly state "I don't know."
+
+3. **Conflating agent and method**: The *agent* performing an operation (e.g., TMA hardware) is distinct from the *method* of memory access (e.g., async proxy vs generic proxy). Do not conflate these.
+
+**Before making any claim about PTX/CUDA behavior:**
+1. Search the PTX ISA manual (`manual/ptx_isa_9.1.pdf`) for explicit statements
+2. Search the CUDA Programming Guide (`manual/cuda-programming-guide.pdf`) for context
+3. If no evidence exists, state "The documentation does not specify this" rather than guessing
+
 ## Repository Overview
 
 CUTLASS is NVIDIA's CUDA Templates for Linear Algebra Subroutines - a header-only C++ template library for high-performance matrix multiplication (GEMM) and related computations. It supports architectures from Volta (SM70) through Blackwell (SM100/SM120).
 
 CUTLASS 4.x adds **CuTe DSL**, a Python-native interface for writing high-performance CUDA kernels without C++ expertise.
-
-## Build Commands
-
-```bash
-# Set CUDA compiler
-export CUDACXX=${CUDA_INSTALL_PATH}/bin/nvcc
-
-# Configure (specify target architecture to reduce compile time)
-mkdir build && cd build
-cmake .. -DCUTLASS_NVCC_ARCHS=80        # Ampere
-cmake .. -DCUTLASS_NVCC_ARCHS=90a       # Hopper (use 'a' suffix for arch-specific features)
-cmake .. -DCUTLASS_NVCC_ARCHS=100a      # Blackwell datacenter
-cmake .. -DCUTLASS_NVCC_ARCHS=120a      # Blackwell GeForce RTX 50 series
-
-# Build all unit tests
-make test_unit -j
-
-# Build specific test targets
-make cutlass_test_unit_gemm -j
-make cutlass_test_unit_conv -j
-make cutlass_test_unit_cute -j
-
-# Build profiler
-make cutlass_profiler -j16
-
-# Build specific examples
-make 00_basic_gemm -j
-
-# Build subset of kernels (faster builds)
-cmake .. -DCUTLASS_NVCC_ARCHS=80 -DCUTLASS_LIBRARY_KERNELS=cutlass_tensorop_s*gemm_f16_*
-```
-
-## Running Tests
-
-```bash
-# Run all unit tests via CTest
-cd build && ctest
-
-# Run specific test binary directly
-./test/unit/gemm/cutlass_test_unit_gemm
-
-# Run with GTest filter
-./test/unit/gemm/cutlass_test_unit_gemm --gtest_filter=*SM80*
-
-# Test levels (0=Sanity, 1=Release, 2=Exhaustive)
-cmake .. -DCUTLASS_TEST_LEVEL=1
-```
-
-## Python Interface
-
-```bash
-# Install CUTLASS Python package
-pip install .                    # or pip install -e . for development
-pip install nvidia-cutlass       # from PyPI
-
-# Install cutlass_library only
-python python/setup_library.py develop --user
-
-# Run CuTe DSL examples
-python examples/python/CuTeDSL/ampere/elementwise_apply.py
-```
 
 ## Architecture
 
@@ -208,14 +162,93 @@ if (issue_tma) {
 - `tma_partition()` - Called by ALL threads to partition tensors (see `include/cute/atom/copy_traits_sm90_tma.hpp`)
 - `copy()` with TMA atom - Called by SINGLE elected thread only
 
-## Profiler Usage
+### TMA and mbarrier Synchronization Model (PTX Level)
 
-```bash
-# Profile GEMM kernels
-./tools/profiler/cutlass_profiler --kernels=cutlass_tensorop_*gemm* --m=4096 --n=4096 --k=4096
+This section documents the correct model for how TMA (`cp.async.bulk`) interacts with mbarrier for synchronization. Understanding this requires distinguishing between the **data plane** and **control plane** of TMA operations.
 
-# Profile convolution
-./tools/profiler/cutlass_profiler --kernels=cutlass_tensorop_*fprop* --n=8 --h=224 --w=224 --c=128 --k=128
+#### Data Plane vs Control Plane
+
+TMA operations have two distinct aspects:
+
+| Aspect | Operations | Proxy Used | Agent |
+|--------|------------|------------|-------|
+| **Data Plane** | Read from global, write to shared | Async proxy | TMA hardware |
+| **Control Plane** | mbarrier access (complete-tx) | Generic proxy | TMA hardware |
+
+**Key insight:** The TMA hardware unit is the agent for both, but it uses **different proxies** for different memory accesses.
+
+#### Evidence from PTX ISA Manual
+
+From §9.7.9.25.2 (Async Proxy):
+> "The `cp{.reduce}.async.bulk` operations are performed in the asynchronous proxy (or async proxy)."
+
+From §9.7.9.25.4.1 (cp.async.bulk):
+> "This instruction accesses its mbarrier operand using **generic-proxy**."
+
+These statements are complementary, not contradictory:
+- "Operations" (data movement) use async proxy
+- "mbarrier operand" access uses generic proxy
+
+#### Synchronization Requirements
+
+| Sync Point | Purpose | Required Instruction |
+|------------|---------|---------------------|
+| After `mbarrier.init`, before other threads use it | CTA-wide visibility of initialized mbarrier | `bar.sync` (CTA barrier) |
+| After `mbarrier.try_wait` returns True | Visibility of data written by TMA | Implicit with `.acquire` qualifier |
+
+**Critical clarification:** `fence.proxy.async` is needed for ordering between generic proxy and async proxy operations on the **data buffers**, NOT for mbarrier operations. Since both threads and TMA access the mbarrier via generic proxy, no cross-proxy fence is needed for the mbarrier itself.
+
+#### Example from PTX ISA Manual (mbarrier.init)
+
+```asm
+mbarrier.init.shared::cta.b64 [shMem], 12;
+bar.sync 0;   // CTA barrier - NOT fence.proxy.async
+// ... other mbarrier operations on shMem
+```
+
+The manual uses `bar.sync`, not `fence.proxy.async`, because mbarrier operations are entirely within the generic proxy domain.
+
+#### When fence.proxy.async IS Needed
+
+`fence.proxy.async` is needed when:
+1. Threads write to a buffer via generic proxy, then TMA reads it via async proxy
+2. TMA writes to a buffer via async proxy, then threads read it via generic proxy (though this has an implicit fence on completion)
+
+It is NOT needed for mbarrier synchronization between `mbarrier.init` and `cp.async.bulk`.
+
+#### Complete-tx Semantics
+
+From PTX ISA §9.7.9.25.4.1:
+> "The copy operation in `cp.async.bulk` is treated as a weak memory operation and the complete-tx operation on the mbarrier has **.release semantics at .cluster scope**."
+
+This means:
+1. The data write (async proxy) happens-before the complete-tx (generic proxy)
+2. Any thread observing phase completion via `mbarrier.try_wait.acquire` will see the data
+3. The release/acquire pairing provides the necessary memory ordering
+
+#### Correct Synchronization Pattern (PTX)
+
+```asm
+// === INITIALIZATION (one elected thread) ===
+elect.sync _|p, 0xffffffff;
+@p mbarrier.init.shared::cta.b64 [mbar], 1;
+@p mbarrier.expect_tx.shared::cta.b64 [mbar], 4096;
+
+// CTA barrier ensures all threads see initialized mbarrier
+// (both thread and TMA access mbarrier via generic proxy, so bar.sync suffices)
+bar.sync 0;
+
+// === PRODUCER (one elected thread) ===
+// Issue TMA - no fence.proxy.async needed for mbarrier
+@p cp.async.bulk.shared::cta.global.mbarrier::complete_tx::bytes
+      [smem_buffer], [gmem_ptr], 4096, [mbar];
+
+// === CONSUMER (all threads) ===
+// Wait with acquire semantics - provides ordering for data visibility
+mbarrier.try_wait.acquire.shared::cta.b64 complete, [mbar], phase;
+
+// Data is now visible - safe to read
+ld.shared.b32 r0, [smem_buffer];
 ```
 
 ## CuTe DSL Programming Guide
@@ -419,21 +452,65 @@ Note that C++ CuTe requires explicit election for TMA (using `cute::elect_one_sy
 
 **Ground truth reference manuals are available in `manual/` for authoritative information on CUDA and PTX.** When uncertain about CUDA programming concepts, PTX instruction semantics, or hardware behavior, consult these documents.
 
+### Required Tools: `pdfgrep` and `pdftotext`
+
+**CRITICAL: `pdfgrep` and `pdftotext` are essential tools for searching the reference manuals. Before proceeding with any manual lookup, verify they are installed.** If either tool is missing, **stop and ask the user to install them** using their system's package manager:
+
+| Tool | Package |
+|------|---------|
+| `pdftotext` | `poppler-utils` |
+| `pdfgrep` | `pdfgrep` |
+
+Installation hints by distro:
+```bash
+# Debian/Ubuntu
+sudo apt install poppler-utils pdfgrep
+
+# Fedora/RHEL
+sudo dnf install poppler-utils pdfgrep
+
+# Arch Linux
+sudo pacman -S poppler pdfgrep
+
+# macOS (Homebrew)
+brew install poppler pdfgrep
+```
+
 ### How to Search the Manuals
 
-```bash
-# Search entire document (slow but comprehensive)
-pdftotext manual/cuda-programming-guide.pdf - | grep -i "search term"
-pdftotext manual/ptx_isa_9.1.pdf - | grep -i "search term"
+**PREFERRED: Use `pdfgrep` for fast, direct PDF searching.** The `-n` flag returns page numbers that correspond directly to `pdftotext -f/-l` page numbers (no offset needed).
 
-# PREFERRED: Extract specific pages by topic (fast, use page index below)
+```bash
+# Search with page numbers (PREFERRED - fast, gives page locations)
+pdfgrep -n "search term" manual/ptx_isa_9.1.pdf
+pdfgrep -n "search term" manual/cuda-programming-guide.pdf
+
+# Case-insensitive search
+pdfgrep -ni "mbarrier" manual/ptx_isa_9.1.pdf
+
+# Limit results
+pdfgrep -n -m 10 "cp.async.bulk" manual/ptx_isa_9.1.pdf
+
+# Count matches
+pdfgrep -c "wgmma" manual/ptx_isa_9.1.pdf
+
+# Then read specific pages using pdftotext with page numbers from pdfgrep
+pdftotext -f 326 -l 330 manual/ptx_isa_9.1.pdf -    # Read pages around a match
+```
+
+**Workflow:** Use `pdfgrep -n` to locate the page, then `pdftotext -f <page> -l <page+N>` to read the full content around that page.
+
+**Fallback: `pdftotext | grep` for when you need context lines or pipe-based filtering:**
+
+```bash
+# Search entire document (slower but supports context lines)
+pdftotext manual/cuda-programming-guide.pdf - | grep -i -A10 -B2 "unified memory"
+
+# Extract specific pages by topic (fast, use page index below)
 pdftotext -f 403 -l 425 manual/ptx_isa_9.1.pdf -    # mbarrier instructions
 pdftotext -f 569 -l 620 manual/ptx_isa_9.1.pdf -    # wgmma (Hopper MMA)
 pdftotext -f 623 -l 740 manual/ptx_isa_9.1.pdf -    # tcgen05 (Blackwell)
 pdftotext -f 308 -l 340 manual/ptx_isa_9.1.pdf -    # TMA async copy
-
-# Search with context
-pdftotext manual/cuda-programming-guide.pdf - | grep -i -A10 -B2 "unified memory"
 ```
 
 ### Methodology: Using the Built-in Table of Contents
