@@ -413,6 +413,8 @@ pdftotext -f 326 -l 330 manual/ptx_isa_9.1.pdf -        # Read pages around a ma
 
 **Workflow:** Use `pdfgrep -n` to locate the page, then `pdftotext -f <page> -l <page+N>` to read the full content around that page.
 
+**Regex caveat:** `pdfgrep` uses ERE (like `grep -E`), so use `"A|B"` for alternation, NOT `"A\|B"` (BRE convention — silently matches nothing in ERE).
+
 ### Extracting and Viewing Figures from PDFs
 
 The manuals contain diagrams and figures (e.g., matrix fragment layouts, memory hierarchy diagrams) that `pdftotext` silently skips. Use `pdfimages` to extract them, then view with the `Read` tool.
