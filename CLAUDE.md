@@ -452,14 +452,15 @@ Note that C++ CuTe requires explicit election for TMA (using `cute::elect_one_sy
 
 **Ground truth reference manuals are available in `manual/` for authoritative information on CUDA and PTX.** When uncertain about CUDA programming concepts, PTX instruction semantics, or hardware behavior, consult these documents.
 
-### Required Tools: `pdfgrep` and `pdftotext`
+### Required Tools: `pdfgrep`, `pdftotext`, and `pdfimages`
 
-**CRITICAL: `pdfgrep` and `pdftotext` are essential tools for searching the reference manuals. Before proceeding with any manual lookup, verify they are installed.** If either tool is missing, **stop and ask the user to install them** using their system's package manager:
+**CRITICAL: `pdfgrep`, `pdftotext`, and `pdfimages` are essential tools for searching the reference manuals. Before proceeding with any manual lookup, verify they are installed.** If either tool is missing, **stop and ask the user to install them** using their system's package manager:
 
-| Tool | Package |
-|------|---------|
-| `pdftotext` | `poppler-utils` |
-| `pdfgrep` | `pdfgrep` |
+| Tool | Package | Purpose |
+|------|---------|---------|
+| `pdftotext` | `poppler-utils` | Extract text from PDF pages |
+| `pdfimages` | `poppler-utils` | Extract embedded images/figures from PDF pages |
+| `pdfgrep` | `pdfgrep` | Search text within PDFs with page numbers |
 
 Installation hints by distro:
 ```bash
@@ -499,6 +500,52 @@ pdftotext -f 326 -l 330 manual/ptx_isa_9.1.pdf -    # Read pages around a match
 ```
 
 **Workflow:** Use `pdfgrep -n` to locate the page, then `pdftotext -f <page> -l <page+N>` to read the full content around that page.
+
+### Extracting and Viewing Figures from PDFs
+
+The manuals contain diagrams and figures (e.g., matrix fragment layouts, memory hierarchy diagrams) that `pdftotext` silently skips. Use `pdfimages` to extract them, then view with the `Read` tool.
+
+**Workflow:**
+1. **Locate the figure** — use `pdfgrep -n` or `pdftotext` to find the figure number and its page
+2. **Extract** — use `pdfimages -png` with the page range containing the figure
+3. **View** — use the `Read` tool on the extracted PNG file
+
+```bash
+# Step 1: Find which page mentions the figure
+pdfgrep -n "Figure 183" manual/ptx_isa_9.1.pdf
+
+# Step 2: Extract images from that page (and adjacent page in case figure spans pages)
+mkdir -p /tmp/ptx_figures
+pdfimages -png -f 641 -l 642 manual/ptx_isa_9.1.pdf /tmp/ptx_figures/fig183
+# Output files: /tmp/ptx_figures/fig183-000.png, fig183-001.png, ...
+
+# Step 3: View extracted image with the Read tool
+# Read /tmp/ptx_figures/fig183-000.png
+```
+
+**Identifying figures on multi-figure pages:** Use `pdfimages -list` to see metadata for each image without extracting. The `num` column matches the `-NNN` suffix in extracted filenames. Cross-reference the `page` column with figure captions from `pdftotext` to identify which image is which — images appear in document order within each page.
+
+```bash
+# List image metadata (page, index, dimensions) without extracting
+pdfimages -list -f 694 -l 696 manual/ptx_isa_9.1.pdf
+# Output:
+# page   num  type   width height ...
+#  694     0 image    1566   415  ...   ← Figure 207 (wide layout table)
+#  694     1 image    1543   417  ...   ← Figure 208 (address table)
+#  695     2 image    1090   581  ...   ← Figure 209 (taller, sparse layout)
+#  ...
+
+# Then extract only the page you need
+pdfimages -png -f 694 -l 694 manual/ptx_isa_9.1.pdf /tmp/figs/out
+# Produces out-000.png (Figure 207) and out-001.png (Figure 208)
+```
+
+**Tips:**
+- `pdfimages` names output files as `<prefix>-NNN.png` where NNN matches the `num` column from `-list`
+- Use `-f` and `-l` to limit to specific pages; without them it extracts ALL images from the entire PDF
+- Images within a page appear in document order, so the Nth image on a page corresponds to the Nth figure caption from `pdftotext`
+- The `width`/`height` columns can help distinguish figure types (e.g., wide tables vs tall diagrams) when captions alone are ambiguous
+- The `pdfgrep -n` page numbers work directly as `-f`/`-l` arguments (no offset needed)
 
 **Fallback: `pdftotext | grep` for when you need context lines or pipe-based filtering:**
 

@@ -3,7 +3,8 @@
     "allow": [
       "Bash(pdftotext:*)",
       "Bash(pdfgrep:*)",
-      "Bash(pdfinfo:*)"
+      "Bash(pdfinfo:*)",
+      "Bash(pdfimages:*)"
     ]
   }
 }
