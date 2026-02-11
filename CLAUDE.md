@@ -12,21 +12,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Recommended Search Commands
 
+**ALWAYS use ERE (Extended Regular Expressions) for all search tools.** This eliminates dialect mismatches between tools:
+- `pdfgrep` uses ERE natively
+- `grep` requires `-E` flag for ERE (or use `egrep`)
+- **NEVER use BRE `\|`** — it silently fails in `pdfgrep` and is a non-portable GNU extension in `grep`
+
 ```bash
 # Search for a pattern in all files
-grep -r "pattern" include/cute/
+grep -rE "pattern" include/cute/
 
 # Search with context lines
-grep -rn -A5 -B5 "tma_partition" .
+grep -rnE -A5 -B5 "tma_partition" .
 
 # Search specific file types
-grep -r --include="*.hpp" "elect_one" include/
+grep -rE --include="*.hpp" "elect_one" include/
 
 # Find files by name
 find . -name "*.py" -path "*/CuTeDSL/*"
 
 # Case-insensitive search
-grep -ri "mbarrier" python/CuTeDSL/
+grep -riE "mbarrier" python/CuTeDSL/
+
+# Alternation (ERE style — same syntax in grep -E and pdfgrep)
+grep -rE "pattern1|pattern2" include/cute/
+pdfgrep -ni "mbarrier|fence" manual/ptx_isa_9.1.pdf
 ```
 
 ## Maintaining This File
@@ -401,9 +410,12 @@ Packages needed: `pdftotext`, `pdfimages` → `poppler-utils`; `pdfgrep` → `pd
 
 **PREFERRED: Use `pdfgrep` for fast, direct PDF searching.** The `-n` flag returns page numbers that correspond directly to `pdftotext -f/-l` page numbers (no offset needed).
 
+**Regex dialect:** `pdfgrep` uses ERE natively — see "Recommended Search Commands" above for the unified ERE rule that applies to all search tools.
+
 ```bash
 pdfgrep -n "search term" manual/ptx_isa_9.1.pdf         # Search with page numbers
 pdfgrep -ni "mbarrier" manual/ptx_isa_9.1.pdf           # Case-insensitive
+pdfgrep -ni "mbarrier|fence" manual/ptx_isa_9.1.pdf     # Alternation (ERE)
 pdfgrep -n -m 10 "cp.async.bulk" manual/ptx_isa_9.1.pdf # Limit results
 pdfgrep -c "wgmma" manual/ptx_isa_9.1.pdf               # Count matches
 
@@ -413,7 +425,7 @@ pdftotext -f 326 -l 330 manual/ptx_isa_9.1.pdf -        # Read pages around a ma
 
 **Workflow:** Use `pdfgrep -n` to locate the page, then `pdftotext -f <page> -l <page+N>` to read the full content around that page.
 
-**Regex caveat:** `pdfgrep` uses ERE (like `grep -E`), so use `"A|B"` for alternation, NOT `"A\|B"` (BRE convention — silently matches nothing in ERE).
+**CRITICAL: Distinguishing page numbers in `pdfgrep -n` output.** Each output line has the format `<actual_page>:<matched_text>`. The number **before the colon** is the actual PDF page number — use this directly with `pdftotext -f/-l`. However, the matched text itself may contain **different page numbers** (e.g., TOC entries like `"cuTensorMapEncodeTiled ... 546"`). Those in-text numbers are logical/TOC page numbers and require the offset formula. **Never use a page number found inside the text content as a `pdftotext -f/-l` argument without first applying the offset.**
 
 ### Extracting and Viewing Figures from PDFs
 
