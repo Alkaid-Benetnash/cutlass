@@ -246,6 +246,41 @@ ld.shared.b32 r0, [smem_buffer];  // Data now visible
 
 ## CuTe DSL Programming Guide
 
+### Official CuTe DSL Documentation
+
+**`media/docs/pythonDSL/`** contains the official CuTe DSL documentation (RST format). Consult these for authoritative information on DSL semantics before searching source code.
+
+#### General Topics (`cute_dsl_general/`)
+
+| Document | Topics |
+|----------|--------|
+| `dsl_introduction.rst` | Decorators (`@jit`, `@kernel`), calling conventions (which callers can invoke which callees) |
+| `dsl_control_flow.rst` | `range`/`range_constexpr`, `const_expr`, `if`/`while` compile-time vs dynamic, software pipelining (`prefetch_stages`), limitations |
+| `dsl_code_generation.rst` | AST rewrite vs tracing, preprocessor mode (`preprocess=True/False`) |
+| `dsl_jit_arg_generation.rst` | `Constexpr` annotation, static vs dynamic args, `JitArgument`/`DynamicExpression` protocols, custom type adapters |
+| `dsl_jit_caching.rst` | `cute.compile`, JIT Executor, cache keys (MLIR bytecode hash), file caching (`CUTE_DSL_CACHE_DIR`) |
+| `dsl_jit_compilation_options.rst` | Optimization levels, debug flags for `cute.compile` |
+| `dsl_dynamic_layout.rst` | Static vs dynamic tensor layouts, framework tensor conversion |
+| `debugging.rst` | Source correlation (`CUTE_DSL_LINEINFO=1`), logging, debugging techniques |
+| `framework_integration.rst` | DLPack protocol, implicit tensor conversion from PyTorch/JAX |
+| `compile_with_tvm_ffi.rst` | Apache TVM FFI integration for faster invocation |
+| `autotuning_gemm.rst` | Search space definition, benchmarking, caching for autotuning |
+| `notebooks.rst` | Links to educational Jupyter notebooks |
+
+#### API Reference
+
+**Do not parse `cute_dsl_api/` API documents.** These are auto-generated from the CuTe DSL source code (`python/CuTeDSL/`). Always refer to the source code directly instead — same information with full context.
+
+#### Other Top-Level Docs
+
+| Document | Topics |
+|----------|--------|
+| `overview.rst` | Project motivation, key concepts, relationship to C++ |
+| `quick_start.rst` | Installation and setup |
+| `limitations.rst` | Unsupported features (PDL, convolutions, Windows, etc.), programming model constraints |
+| `faqs.rst` | Common questions (C++ vs DSL, versioning, etc.) |
+| `functionality.rst` | Feature overview |
+
 ### Understanding CuTe DSL APIs
 
 **When CuTe DSL runtime code or documentation is unclear, always search for similar concepts and implementations in the C++ CuTe library (`include/cute/`).** CuTe DSL mirrors C++ CuTe abstractions, so the C++ headers often provide clearer documentation, more detailed comments, and reference implementations that explain the underlying concepts.
