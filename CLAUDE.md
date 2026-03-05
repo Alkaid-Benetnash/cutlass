@@ -46,6 +46,10 @@ When updating CLAUDE.md:
 3. **If unsure whether upstream examples exist**, explicitly ask the user for judgment before adding generated code to CLAUDE.md.
 4. **Include source file references** (e.g., `include/cute/arch/cluster_sm90.hpp:180`) when citing evidence from the codebase.
 
+### Maintaining `cute_notes/`
+
+**Before creating or modifying any file in `cute_notes/`, always read its specific workflow `cute_notes/README.md` first.**
+
 ### Compaction Guidelines
 
 When CLAUDE.md grows too large, apply these principles:
